@@ -1,219 +1,1110 @@
 "use client";
 
 import { useRef, useMemo, useState, useEffect } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { Stars, OrbitControls, Html } from '@react-three/drei';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Stars, OrbitControls, Line, useTexture } from '@react-three/drei';
+import { EffectComposer, Bloom, ToneMapping, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
+import { SpaceWeatherData } from '../utils/spaceWeatherApi';
+import { EarthLayersInspector } from './DashboardUI';
 
 type TargetPositions = Record<string, THREE.Vector3>;
 
+export interface TargetInfo {
+  name: string;
+  type: 'Sol' | 'Planeta' | 'Asteroide' | 'Sonda' | 'Lua' | 'Satélite' | 'Galáxia' | 'Radar Terrestre';
+  radius: number;
+  speedKmh?: number;
+  diameter?: string;
+  distanceKm?: string;
+  orbitalPeriod?: string;
+  gravity?: string;
+  details?: string;
+  imageUrl?: string;
+  isHazardous?: boolean;
+}
+
 export interface CamadasConfig {
   orbitas: boolean;
-  alinhamento: boolean;
-  asteroides: boolean;
+  miraAlvo: boolean;
+  ventoSolar: boolean;
   planetas: boolean;
+  satelites: boolean;
+  radaresTerra: boolean;
+  galaxias: boolean;
+  constelacoes: boolean;
+  asteroides: boolean;
 }
 
-// Gerador de Texturas Fotorrealistas de Alta Fidelidade (100% local, sem 404 ou quebras de rede)
-function createDetailedPlanetTexture(planet: string): THREE.CanvasTexture {
-  if (typeof document === 'undefined') {
-    return new THREE.CanvasTexture(document.createElement('canvas'));
-  }
+const PLANET_TEXTURES = {
+  mercury: 'https://raw.githubusercontent.com/jeromeetienne/threex.planets/master/images/mercurymap.jpg',
+  venus: 'https://raw.githubusercontent.com/jeromeetienne/threex.planets/master/images/venusmap.jpg',
+  earthDay: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg',
+  earthNormal: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg',
+  earthLights: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_lights_2048.png',
+  moon: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/moon_1024.jpg',
+  mars: 'https://raw.githubusercontent.com/jeromeetienne/threex.planets/master/images/marsmap1k.jpg',
+  jupiter: 'https://raw.githubusercontent.com/jeromeetienne/threex.planets/master/images/jupitermap.jpg',
+  saturn: 'https://raw.githubusercontent.com/jeromeetienne/threex.planets/master/images/saturnmap.jpg',
+  saturnRing: 'https://raw.githubusercontent.com/jeromeetienne/threex.planets/master/images/saturnringcolor.jpg',
+  uranus: 'https://raw.githubusercontent.com/jeromeetienne/threex.planets/master/images/uranusmap.jpg',
+  neptune: 'https://raw.githubusercontent.com/jeromeetienne/threex.planets/master/images/neptunemap.jpg',
+  sun: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/lava/lavatile.jpg',
+};
 
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d')!;
+// 1. SOL
+function RealisticSun({
+  onFocus,
+  positionsRef,
+}: {
+  onFocus: (info: TargetInfo) => void;
+  positionsRef: React.MutableRefObject<TargetPositions>;
+}) {
+  const sunMeshRef = useRef<THREE.Mesh>(null);
+  const coronaRef = useRef<THREE.Mesh>(null);
 
-  if (planet === 'mercury') {
-    // Relevo cinzento com milhares de crateras de impacto e manchas de albedo
-    ctx.fillStyle = '#87898c';
-    ctx.fillRect(0, 0, 1024, 512);
+  const sunTexture = useTexture(PLANET_TEXTURES.sun);
+  sunTexture.wrapS = sunTexture.wrapT = THREE.RepeatWrapping;
 
-    for (let i = 0; i < 600; i++) {
-      const x = Math.random() * 1024;
-      const y = Math.random() * 512;
-      const r = Math.random() * 14 + 2;
-      const grad = ctx.createRadialGradient(x, y, 1, x, y, r);
-      grad.addColorStop(0, '#5a5b5e');
-      grad.addColorStop(0.8, '#717377');
-      grad.addColorStop(1, '#a6a9ad');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+  useFrame(({ clock }, delta) => {
+    positionsRef.current['Sol'] = new THREE.Vector3(0, 0, 0);
+
+    const t = clock.getElapsedTime();
+    if (sunMeshRef.current) {
+      sunMeshRef.current.rotation.y += delta * 0.008;
+      sunMeshRef.current.rotation.x += delta * 0.002;
     }
-  } else if (planet === 'venus') {
-    // Atmosfera densa de ácido sulfúrico com bandas de convecção cremosas e douradas
-    const grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, '#ecd799');
-    grad.addColorStop(0.25, '#f4e5b8');
-    grad.addColorStop(0.5, '#e4c988');
-    grad.addColorStop(0.75, '#edd9a3');
-    grad.addColorStop(1, '#d8b975');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 1024, 512);
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-    for (let y = 0; y < 512; y += 4) {
-      if (Math.sin(y * 0.05) > 0.2) {
-        ctx.fillRect(0, y, 1024, 3);
-      }
+    if (coronaRef.current) {
+      const s = 1.05 + Math.sin(t * 1.5) * 0.015;
+      coronaRef.current.scale.set(s, s, s);
     }
-  } else if (planet === 'mars') {
-    // Relevo ferruginoso com mares de basalto escuro e calotas polares de gelo
-    ctx.fillStyle = '#b84e27';
-    ctx.fillRect(0, 0, 1024, 512);
+  });
 
-    // Bacias de impacto e planaltos escuros (Syrtis Major / Acidalia)
-    ctx.fillStyle = '#7a3118';
-    for (let i = 0; i < 35; i++) {
-      ctx.beginPath();
-      ctx.ellipse(
-        Math.random() * 1024,
-        150 + Math.random() * 220,
-        Math.random() * 120 + 30,
-        Math.random() * 45 + 15,
-        Math.random(),
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-    }
+  const sunData: TargetInfo = {
+    name: 'Sol',
+    type: 'Sol',
+    radius: 2.2,
+    diameter: '1.392.700 km',
+    distanceKm: 'Centro Gravitacional',
+    orbitalPeriod: '230 milhões de anos (Galáxia)',
+    gravity: '274 m/s²',
+    details: 'Estrela hospedeira tipo G2V concentrando 99,86% da massa do sistema.',
+    imageUrl: 'https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001435/GSFC_20171208_Archive_e001435~orig.jpg'
+  };
 
-    // Calotas Polares Brancas
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(0, 0, 1024, 32);
-    ctx.fillRect(0, 480, 1024, 32);
-  } else if (planet === 'jupiter') {
-    // Faixas atmosféricas alternadas com turbulências
-    for (let y = 0; y < 512; y++) {
-      const wave = Math.sin(y * 0.08) * 0.5 + Math.sin(y * 0.02) * 0.3;
-      if (wave > 0.3) {
-        ctx.fillStyle = '#bc7c49';
-      } else if (wave > -0.1) {
-        ctx.fillStyle = '#eed6b3';
-      } else if (wave > -0.4) {
-        ctx.fillStyle = '#9c5b2e';
+  return (
+    <group position={[0, 0, 0]}>
+      <mesh
+        ref={sunMeshRef}
+        onClick={(e) => { e.stopPropagation(); onFocus(sunData); }}
+        className="cursor-pointer"
+      >
+        <sphereGeometry args={[2.2, 64, 64]} />
+        <meshBasicMaterial map={sunTexture} color={[1.8, 1.35, 0.8]} toneMapped={false} />
+      </mesh>
+
+      <mesh ref={coronaRef} raycast={() => null}>
+        <sphereGeometry args={[2.32, 32, 32]} />
+        <meshBasicMaterial color={[1.2, 0.6, 0.15]} transparent opacity={0.22} blending={THREE.AdditiveBlending} toneMapped={false} />
+      </mesh>
+
+      <pointLight 
+        intensity={34.0} 
+        distance={450} 
+        decay={0.1} 
+        color="#fffaf0" 
+      />
+    </group>
+  );
+}
+
+// 2. VENTO SOLAR DINÂMICO
+function SolarElectromagneticWave({ 
+  kpIndex = 2, 
+  windSpeed = 400,
+  timeScale = 1
+}: { 
+  kpIndex?: number; 
+  windSpeed?: number;
+  timeScale?: number;
+}) {
+  const waveCount = 5;
+  const meshesRef = useRef<(THREE.Mesh | null)[]>([]);
+
+  const baseSpeed = 0.04 * (windSpeed / 400) * (timeScale === 0 ? 0 : Math.max(0.35, timeScale * 0.7));
+  const isStorm = kpIndex >= 5;
+
+  useFrame(({ clock }) => {
+    const elapsed = clock.getElapsedTime() * baseSpeed;
+
+    meshesRef.current.forEach((mesh, index) => {
+      if (!mesh) return;
+
+      const offset = index / waveCount;
+      const progress = (elapsed + offset) % 1;
+
+      const currentRadius = 2.4 + progress * 78.0;
+      mesh.scale.set(currentRadius, currentRadius, 1);
+
+      const fadeOut = Math.pow(1 - progress, 2.2);
+      const mat = mesh.material as THREE.MeshBasicMaterial;
+
+      const peakOpacity = isStorm ? 0.45 : 0.22;
+      mat.opacity = Math.max(0, fadeOut * peakOpacity);
+    });
+  });
+
+  return (
+    <group rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+      {Array.from({ length: waveCount }).map((_, i) => (
+        <mesh
+          key={i}
+          ref={(el) => { meshesRef.current[i] = el; }}
+          raycast={() => null}
+        >
+          <ringGeometry args={[0.985, 1.0, 128]} />
+          <meshBasicMaterial
+            color={isStorm ? "#ef4444" : "#f59e0b"}
+            transparent
+            opacity={0}
+            side={THREE.DoubleSide}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// 3. MODELO DE PARTÍCULAS GALÁCTICAS REALISTAS
+function RealisticGalaxyParticleModel({
+  galaxyType,
+  colorCore,
+  colorArms,
+  radius,
+  onClick,
+}: {
+  galaxyType: 'spiral-large' | 'spiral-flocculent' | 'irregular-cloud';
+  colorCore: string;
+  colorArms: string;
+  radius: number;
+  onClick: (e: any) => void;
+}) {
+  const pointsRef = useRef<THREE.Points>(null);
+
+  const [positions, colors] = useMemo(() => {
+    const count = 4800;
+    const pos = new Float32Array(count * 3);
+    const col = new Float32Array(count * 3);
+
+    const cCore = new THREE.Color(colorCore);
+    const cArms = new THREE.Color(colorArms);
+
+    for (let i = 0; i < count; i++) {
+      let x = 0, y = 0, z = 0;
+      let distFromCenter = 0;
+
+      if (galaxyType === 'spiral-large') {
+        const r = Math.pow(Math.random(), 2.0) * radius;
+        const arms = 2;
+        const armOffset = (i % arms) * ((Math.PI * 2) / arms);
+        const theta = (r / radius) * 4.5 + armOffset;
+        const spread = (Math.random() - 0.5) * (1.0 + (r / radius) * 4.0);
+
+        x = (Math.cos(theta) * r + spread) * 1.35;
+        y = (Math.random() - 0.5) * (0.6 + (1 - r / radius) * 2.0);
+        z = Math.sin(theta) * r + spread;
+        distFromCenter = r / radius;
+      } else if (galaxyType === 'spiral-flocculent') {
+        const r = Math.pow(Math.random(), 1.6) * radius;
+        const arms = 4;
+        const armOffset = (i % arms) * ((Math.PI * 2) / arms);
+        const theta = (r / radius) * 3.2 + armOffset + (Math.random() - 0.5) * 0.8;
+        const spread = (Math.random() - 0.5) * (1.5 + (r / radius) * 3.0);
+
+        x = Math.cos(theta) * r + spread;
+        y = (Math.random() - 0.5) * (0.8 + (1 - r / radius) * 1.5);
+        z = Math.sin(theta) * r + spread;
+        distFromCenter = r / radius;
       } else {
-        ctx.fillStyle = '#f5e4cb';
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.pow(Math.random(), 1.2) * radius;
+        const ellipseFactor = 1.35;
+
+        x = Math.cos(angle) * dist * ellipseFactor + (Math.random() - 0.5) * 1.8;
+        y = (Math.random() - 0.5) * (1.2 + (1 - dist / radius) * 2.0);
+        z = Math.sin(angle) * dist + (Math.random() - 0.5) * 1.8;
+        distFromCenter = dist / radius;
       }
-      ctx.fillRect(0, y, 1024, 1);
+
+      pos[i * 3] = x;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = z;
+
+      const lerpFactor = Math.min(1.0, Math.max(0.0, distFromCenter));
+      const c = cCore.clone().lerp(cArms, lerpFactor);
+
+      col[i * 3] = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
     }
 
-    // A Grande Mancha Vermelha
-    const spotX = 650;
-    const spotY = 320;
-    const spotGrad = ctx.createRadialGradient(spotX, spotY, 5, spotX, spotY, 45);
-    spotGrad.addColorStop(0, '#992d15');
-    spotGrad.addColorStop(0.7, '#ba4324');
-    spotGrad.addColorStop(1, 'rgba(238, 214, 179, 0)');
-    ctx.fillStyle = spotGrad;
-    ctx.beginPath();
-    ctx.ellipse(spotX, spotY, 65, 35, -0.08, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (planet === 'saturn') {
-    // Bandas gasosas em tons pastel dourados e manteiga
-    for (let y = 0; y < 512; y++) {
-      const v = Math.sin(y * 0.06) * 0.5 + 0.5;
-      ctx.fillStyle = v > 0.4 ? '#e6cf9e' : '#ceb27a';
-      ctx.fillRect(0, y, 1024, 1);
+    return [pos, col];
+  }, [galaxyType, colorCore, colorArms, radius]);
+
+  useFrame((_, delta) => {
+    if (pointsRef.current) {
+      pointsRef.current.rotation.y += delta * (galaxyType === 'irregular-cloud' ? 0.005 : 0.01);
     }
-  } else if (planet === 'uranus') {
-    // Atmosfera turquesa suave de metano com gradiente subtil
-    const grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, '#74c4d4');
-    grad.addColorStop(0.5, '#9ee0ec');
-    grad.addColorStop(1, '#62b4c5');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 1024, 512);
-  } else if (planet === 'neptune') {
-    // Azul cobalto vibrante com cirros brancos e tempestade escura
-    const grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, '#2153b6');
-    grad.addColorStop(0.5, '#3b74e0');
-    grad.addColorStop(1, '#1b4396');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 1024, 512);
+  });
 
-    // Faixas de cirros brancos de metano
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.fillRect(0, 210, 1024, 6);
-    ctx.fillRect(0, 310, 1024, 4);
+  return (
+    <group onClick={onClick} className="cursor-pointer">
+      <points ref={pointsRef}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
+          <bufferAttribute attach="attributes-color" count={colors.length / 3} array={colors} itemSize={3} />
+        </bufferGeometry>
+        <pointsMaterial
+          size={galaxyType === 'irregular-cloud' ? 0.25 : 0.2}
+          vertexColors
+          transparent
+          opacity={0.65}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </points>
 
-    // Grande Mancha Escura
-    ctx.fillStyle = '#112a66';
-    ctx.beginPath();
-    ctx.ellipse(400, 260, 48, 26, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  return texture;
+      <mesh raycast={() => null}>
+        <sphereGeometry args={[radius * 0.1, 16, 16]} />
+        <meshBasicMaterial color={colorCore} transparent opacity={0.35} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+    </group>
+  );
 }
 
-// Linha orbital fina
+// 4. GALÁXIAS PRÓXIMAS
+function NearbyGalaxies({
+  onFocus,
+  positionsRef,
+}: {
+  onFocus: (info: TargetInfo) => void;
+  positionsRef: React.MutableRefObject<TargetPositions>;
+}) {
+  const galaxias = useMemo(() => [
+    {
+      name: "Galáxia de Andrômeda (M31)",
+      pos: new THREE.Vector3(300, 95, -250),
+      galaxyType: 'spiral-large' as const,
+      colorCore: "#fef08a",
+      colorArms: "#38bdf8",
+      size: 38,
+      distanceKm: "2,537M anos-luz",
+      diameter: "220.000 anos-luz",
+      details: "Maior galáxia espiral do Grupo Local com mais de 1 trilhão de estrelas.",
+      imageUrl: "https://images-assets.nasa.gov/image/PIA04921/PIA04921~orig.jpg"
+    },
+    {
+      name: "Galáxia do Triângulo (M33)",
+      pos: new THREE.Vector3(-270, 75, -280),
+      galaxyType: 'spiral-flocculent' as const,
+      colorCore: "#fae8ff",
+      colorArms: "#c084fc",
+      size: 28,
+      distanceKm: "2,73M anos-luz",
+      diameter: "60.000 anos-luz",
+      details: "Galáxia espiral floculenta com múltiplos braços fragmentados.",
+      imageUrl: "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001465/GSFC_20171208_Archive_e001465~orig.jpg"
+    },
+    {
+      name: "Grande Nuvem de Magalhães (LMC)",
+      pos: new THREE.Vector3(-210, -110, 230),
+      galaxyType: 'irregular-cloud' as const,
+      colorCore: "#fed7aa",
+      colorArms: "#fb923c",
+      size: 26,
+      distanceKm: "163.000 anos-luz",
+      diameter: "14.000 anos-luz",
+      details: "Galáxia anã satélite irregular visível dos céus austrais do Atacama.",
+      imageUrl: "https://images-assets.nasa.gov/image/PIA09178/PIA09178~orig.jpg"
+    }
+  ], []);
+
+  useFrame(() => {
+    galaxias.forEach(g => {
+      positionsRef.current[g.name] = g.pos;
+    });
+  });
+
+  return (
+    <>
+      {galaxias.map((g) => (
+        <group key={g.name} position={g.pos}>
+          <RealisticGalaxyParticleModel
+            galaxyType={g.galaxyType}
+            colorCore={g.colorCore}
+            colorArms={g.colorArms}
+            radius={g.size}
+            onClick={(e) => {
+              e.stopPropagation();
+              onFocus({
+                name: g.name,
+                type: 'Galáxia',
+                radius: g.size * 0.5,
+                distanceKm: g.distanceKm,
+                diameter: g.diameter,
+                details: g.details,
+                imageUrl: g.imageUrl,
+              });
+            }}
+          />
+        </group>
+      ))}
+    </>
+  );
+}
+
+// 5. ANEL DE ÓRBITA CIRCULAR (PLANETAS)
 function OrbitRing({ radius }: { radius: number }) {
   return (
-    <mesh rotation={[Math.PI / 2, 0, 0]}>
-      <ringGeometry args={[radius - 0.035, radius + 0.035, 128]} />
-      <meshBasicMaterial color="#0284c7" opacity={0.25} transparent side={THREE.DoubleSide} />
+    <mesh rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+      <ringGeometry args={[radius - 0.03, radius + 0.03, 128]} />
+      <meshBasicMaterial color="#38bdf8" opacity={0.12} transparent side={THREE.DoubleSide} />
     </mesh>
   );
 }
 
-// Controlador de Câmara sem bloqueio de zoom
+// 6. ASTEROIDES RASTREADOS
+function AsteroidsTrackingSystem({
+  asteroides,
+  timeScale,
+  onFocus,
+  positionsRef,
+  selectedTargetName,
+  showOrbits,
+}: {
+  asteroides: any[];
+  timeScale: number;
+  onFocus: (info: TargetInfo) => void;
+  positionsRef: React.MutableRefObject<TargetPositions>;
+  selectedTargetName?: string;
+  showOrbits?: boolean;
+}) {
+  const beltRef = useRef<THREE.Points>(null);
+
+  const [positions, colors] = useMemo(() => {
+    const count = 3500;
+    const pos = new Float32Array(count * 3);
+    const col = new Float32Array(count * 3);
+    const minR = 26.5;
+    const maxR = 33.2;
+    const baseColorA = new THREE.Color("#d97706");
+    const baseColorB = new THREE.Color("#78716c");
+    const baseColorC = new THREE.Color("#cbd5e1");
+
+    for (let i = 0; i < count; i++) {
+      const r = minR + Math.random() * (maxR - minR);
+      const theta = Math.random() * Math.PI * 2;
+      const y = (Math.random() - 0.5) * 0.9;
+      pos[i * 3] = Math.cos(theta) * r;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = Math.sin(theta) * r;
+      const seed = Math.random();
+      const c = seed > 0.6 ? baseColorA : seed > 0.25 ? baseColorB : baseColorC;
+      col[i * 3] = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
+    }
+    return [pos, col];
+  }, []);
+
+  useFrame((_, delta) => {
+    if (beltRef.current) beltRef.current.rotation.y += delta * 0.0025;
+  });
+
+  return (
+    <group>
+      <points ref={beltRef} raycast={() => null}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
+          <bufferAttribute attach="attributes-color" count={colors.length / 3} array={colors} itemSize={3} />
+        </bufferGeometry>
+        <pointsMaterial size={0.035} vertexColors transparent opacity={0.2} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </points>
+
+      {asteroides.map((ast, i) => (
+        <SingleTrackedAsteroid
+          key={ast.id || i}
+          ast={ast}
+          index={i}
+          total={asteroides.length}
+          timeScale={timeScale}
+          onFocus={onFocus}
+          positionsRef={positionsRef}
+          isSelected={selectedTargetName === ast.name}
+          showOrbits={showOrbits}
+        />
+      ))}
+    </group>
+  );
+}
+
+// 7. MOTOR VISUAL DE COMETA ULTRA-REALISTA (PARTÍCULAS DE SUBLIMAÇÃO + CAUDA DUPLA COM GRADIENTE FADE-OUT)
+function RealisticCometEffect({ position }: { position: THREE.Vector3 }) {
+  const tailGroupRef = useRef<THREE.Group>(null);
+
+  // Gera uma nuvem de 280 partículas de gás e poeira com decaimento exponencial suave
+  const [dustPos, dustColors] = useMemo(() => {
+    const count = 280;
+    const pos = new Float32Array(count * 3);
+    const col = new Float32Array(count * 3);
+
+    const colorCore = new THREE.Color("#a7f3d0"); // verde-branco brilhante na cabeça
+    const colorIon = new THREE.Color("#2dd4bf");  // ciano-esmeralda na cauda de íons
+    const colorDust = new THREE.Color("#e2e8f0"); // poeira estelar pálida
+
+    for (let i = 0; i < count; i++) {
+      // 25% na cabeleira (coma), 75% espalhadas na cauda anti-solar (+Z no espaço local)
+      const isComa = i < count * 0.25;
+
+      if (isComa) {
+        const r = Math.pow(Math.random(), 1.8) * 0.16;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        pos[i * 3 + 2] = r * Math.cos(phi);
+
+        col[i * 3] = colorCore.r;
+        col[i * 3 + 1] = colorCore.g;
+        col[i * 3 + 2] = colorCore.b;
+      } else {
+        // Distância ao longo da cauda (de 0 até 2.4 unidades)
+        const dist = Math.pow(Math.random(), 1.4) * 2.4;
+        // Largura aumenta gradualmente à medida que se afasta do núcleo
+        const spread = 0.02 + dist * 0.11;
+        const angle = Math.random() * Math.PI * 2;
+        const rad = Math.random() * spread;
+
+        // Leve curvatura na cauda de poeira
+        const isDust = i % 3 === 0;
+        const curveX = isDust ? Math.pow(dist, 1.8) * 0.08 : 0;
+
+        pos[i * 3] = Math.cos(angle) * rad + curveX;
+        pos[i * 3 + 1] = Math.sin(angle) * rad;
+        pos[i * 3 + 2] = dist; // Aponta ao longo do eixo +Z
+
+        // Gradiente suave: desaparece completamente nas pontas (fade to black)
+        const fade = Math.pow(1 - dist / 2.4, 2.2);
+        const baseC = isDust ? colorDust : colorIon;
+        col[i * 3] = baseC.r * fade;
+        col[i * 3 + 1] = baseC.g * fade;
+        col[i * 3 + 2] = baseC.b * fade;
+      }
+    }
+
+    return [pos, col];
+  }, []);
+
+  // Geometria de brilho de gás contínuo com gradiente de opacidade nos vértices (sem bordas duras!)
+  const smoothTailGeometry = useMemo(() => {
+    const geo = new THREE.CylinderGeometry(0.14, 0.015, 2.0, 24, 16, true);
+    // Desloca o cilindro para que a base fina fique no (0,0,0) e aponte para +Z
+    geo.rotateX(Math.PI / 2);
+    geo.translate(0, 0, 1.0);
+
+    const posAttr = geo.attributes.position;
+    const colors = new Float32Array(posAttr.count * 3);
+    const cStart = new THREE.Color("#2dd4bf");
+
+    for (let i = 0; i < posAttr.count; i++) {
+      const z = posAttr.getZ(i); // de 0.0 a 2.0
+      const ratio = Math.max(0, Math.min(1, z / 2.0));
+      // Intensidade cai ao quadrado para sumir suavemente no vácuo sem corte seco
+      const intensity = Math.pow(1 - ratio, 2.8) * 0.35;
+      colors[i * 3] = cStart.r * intensity;
+      colors[i * 3 + 1] = cStart.g * intensity;
+      colors[i * 3 + 2] = cStart.b * intensity;
+    }
+
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    return geo;
+  }, []);
+
+  useFrame(() => {
+    if (!tailGroupRef.current) return;
+    // Aponta o eixo +Z exatamente na direção anti-solar (afastando-se do Sol em 0,0,0)
+    const antiSunDir = position.clone().normalize();
+    const targetPoint = position.clone().add(antiSunDir);
+    tailGroupRef.current.lookAt(targetPoint);
+  });
+
+  return (
+    <group ref={tailGroupRef} raycast={() => null}>
+      {/* 1. Halo luminoso suave da cabeleira */}
+      <mesh raycast={() => null}>
+        <sphereGeometry args={[0.13, 20, 20]} />
+        <meshBasicMaterial
+          color="#5eead4"
+          transparent
+          opacity={0.45}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* 2. Véu de plasma com gradiente suave que desaparece no espaço */}
+      <mesh geometry={smoothTailGeometry} raycast={() => null}>
+        <meshBasicMaterial
+          vertexColors
+          transparent
+          opacity={0.7}
+          blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* 3. Partículas cintilantes de sublimação e poeira cósmica */}
+      <points raycast={() => null}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" count={dustPos.length / 3} array={dustPos} itemSize={3} />
+          <bufferAttribute attach="attributes-color" count={dustColors.length / 3} array={dustColors} itemSize={3} />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.032}
+          vertexColors
+          transparent
+          opacity={0.85}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </points>
+    </group>
+  );
+}
+
+// 8. ASTEROIDE E COMETA INTERESTELAR
+function SingleTrackedAsteroid({
+  ast,
+  index,
+  total,
+  timeScale,
+  onFocus,
+  positionsRef,
+  isSelected = false,
+  showOrbits = false,
+}: {
+  ast: any;
+  index: number;
+  total: number;
+  timeScale: number;
+  onFocus: (info: TargetInfo) => void;
+  positionsRef: React.MutableRefObject<TargetPositions>;
+  isSelected?: boolean;
+  showOrbits?: boolean;
+}) {
+  const meshRef = useRef<THREE.Group>(null);
+  const [currentCoord, setCurrentCoord] = useState<THREE.Vector3>(new THREE.Vector3());
+  const isHazardous = ast.is_potentially_hazardous_asteroid;
+  const isInterstellar = ast.isInterstellar || ast.name.includes("3I") || ast.name.includes("ATLAS");
+
+  const rockGeometry = useMemo(() => {
+    const geo = new THREE.DodecahedronGeometry(isInterstellar ? 0.065 : 0.12, 1);
+    const pos = geo.attributes.position;
+    const v = new THREE.Vector3();
+
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      const noise = (Math.sin(v.x * 6.0) * Math.cos(v.y * 6.0) * Math.sin(v.z * 6.0)) * 0.09;
+      v.multiplyScalar(1.0 + noise);
+      pos.setXYZ(i, v.x, v.y, v.z);
+    }
+    geo.computeVertexNormals();
+    return geo;
+  }, [isInterstellar]);
+
+  const orbitParams = useMemo(() => {
+    if (isInterstellar) {
+      const points: THREE.Vector3[] = [];
+      const segments = 120;
+      for (let s = -segments; s <= segments; s++) {
+        const u = (s / segments) * 3.2;
+        const x = Math.sinh(u) * 22.0;
+        const y = u * 4.8 + 2.0;
+        const z = (Math.cosh(u) - 1.0) * 16.0 + 8.5;
+        points.push(new THREE.Vector3(x, y, z));
+      }
+      return { isHyperbolic: true, speed: 0.012, points };
+    }
+
+    const a = 18.0 + (index % 6) * 2.8; 
+    const e = 0.12 + (index % 4) * 0.04;
+    const b = a * Math.sqrt(1 - e * e);
+    const inclination = ((index % 5) - 2) * 0.08; 
+    const speed = 0.01 + ((ast.velocity_kmh || 80000) / 160000) * 0.012;
+    const phaseOffset = index * ((Math.PI * 2) / Math.max(total, 1));
+
+    const points: THREE.Vector3[] = [];
+    const segments = 64;
+    for (let i = 0; i <= segments; i++) {
+      const theta = (i / segments) * Math.PI * 2;
+      const x = Math.cos(theta) * a;
+      const y = Math.sin(theta) * b * Math.sin(inclination);
+      const z = Math.sin(theta) * b * Math.cos(inclination);
+      points.push(new THREE.Vector3(x, y, z));
+    }
+
+    return { isHyperbolic: false, a, b, inclination, speed, phaseOffset, points };
+  }, [index, total, ast, isInterstellar]);
+
+  useFrame(({ clock }) => {
+    let x = 0, y = 0, z = 0;
+
+    if (orbitParams.isHyperbolic) {
+      const earthYearAngle = (clock.getElapsedTime() * timeScale) * 0.012;
+      const cycleProgress = ((earthYearAngle + Math.PI) % (Math.PI * 2)) / (Math.PI * 2);
+      const u = (cycleProgress - 0.5) * 6.4;
+
+      x = Math.sinh(u) * 22.0;
+      y = u * 4.8 + 2.0;
+      z = (Math.cosh(u) - 1.0) * 16.0 + 8.5;
+    } else {
+      const t = (clock.getElapsedTime() * timeScale) * orbitParams.speed + (orbitParams.phaseOffset || 0);
+      x = Math.cos(t) * (orbitParams.a || 18);
+      y = Math.sin(t) * (orbitParams.b || 15) * Math.sin(orbitParams.inclination || 0);
+      z = Math.sin(t) * (orbitParams.b || 15) * Math.cos(orbitParams.inclination || 0);
+    }
+
+    const pos = new THREE.Vector3(x, y, z);
+    positionsRef.current[ast.name] = pos;
+    setCurrentCoord(pos);
+
+    if (meshRef.current) {
+      meshRef.current.position.copy(pos);
+    }
+  });
+
+  const astData: TargetInfo = {
+    name: ast.name,
+    type: 'Asteroide',
+    radius: isInterstellar ? 0.5 : 0.5,
+    diameter: `${ast.diameter_m} m`,
+    speedKmh: ast.velocity_kmh,
+    distanceKm: `${ast.dist_lunar} Distâncias Lunares`,
+    isHazardous: isHazardous,
+    details: ast.details || `Objeto em monitoramento. ${isInterstellar ? 'Trajetória hiperbólica de escape solar.' : 'Órbita nominal heliocêntrica.'}`,
+    imageUrl: ast.imageUrl || (isInterstellar ? 'https://images-assets.nasa.gov/image/PIA23865/PIA23865~orig.jpg' : 'https://images-assets.nasa.gov/image/PIA24174/PIA24174~orig.jpg')
+  };
+
+  return (
+    <group>
+      {(isSelected || (showOrbits && (isHazardous || isInterstellar))) && (
+        <Line
+          points={orbitParams.points}
+          color={isInterstellar ? "#2dd4bf" : isHazardous ? "#ef4444" : "#38bdf8"}
+          opacity={isSelected ? 0.65 : 0.25}
+          transparent
+          lineWidth={isSelected ? 1.4 : 0.8}
+          raycast={() => null}
+        />
+      )}
+
+      {/* GRUPO DO ASTRO */}
+      <group
+        ref={meshRef}
+        onClick={(e) => {
+          e.stopPropagation();
+          onFocus(astData);
+        }}
+        className="cursor-pointer"
+      >
+        {/* Núcleo Rochoso Gelado */}
+        <mesh geometry={rockGeometry}>
+          <meshStandardMaterial
+            color={isInterstellar ? "#ccfbf1" : isHazardous ? "#b91c1c" : "#94a3b8"}
+            emissive={isInterstellar ? "#2dd4bf" : "#000000"}
+            emissiveIntensity={isInterstellar ? 0.6 : 0}
+            roughness={0.85}
+            metalness={0.1}
+            flatShading={true}
+          />
+        </mesh>
+
+        {/* EFEITO REALISTA DE COMETA COM GRADIENTE SUAVE E PARTÍCULAS */}
+        {isInterstellar && <RealisticCometEffect position={currentCoord} />}
+
+        {/* HITBOX INVISÍVEL PARA CLIQUE */}
+        <mesh>
+          <sphereGeometry args={[isInterstellar ? 1.3 : 0.8, 8, 8]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      </group>
+
+      {/* Retículo de mira */}
+      {isSelected && (
+        <mesh position={currentCoord} raycast={() => null}>
+          <ringGeometry args={[0.3, 0.35, 32]} />
+          <meshBasicMaterial
+            color={isInterstellar ? "#2dd4bf" : isHazardous ? "#ef4444" : "#38bdf8"}
+            transparent
+            opacity={0.7}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+// 9. MAGNETOSFERA E CINTURÕES DE VAN ALLEN
+function EarthMagnetosphere({ 
+  kpIndex = 2, 
+  explodedMode = false,
+  showBowShock = false,
+  showVanAllen = false,
+}: { 
+  kpIndex?: number; 
+  explodedMode?: boolean; 
+  showBowShock?: boolean; 
+  showVanAllen?: boolean; 
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const bowShockRef = useRef<THREE.Group>(null);
+  const isStorm = kpIndex >= 5;
+
+  const scaleTarget = explodedMode ? 1.6 : 1.0;
+  const currentScale = useRef(1.0);
+
+  const magneticFieldLines = useMemo(() => {
+    const lines: THREE.Vector3[][] = [];
+    const radiuses = [1.8, 2.3, 2.9];
+
+    radiuses.forEach((r) => {
+      [-1, 1].forEach((side) => {
+        const pts: THREE.Vector3[] = [];
+        for (let i = 0; i <= 32; i++) {
+          const theta = (i / 32) * Math.PI;
+          const rad = r * Math.sin(theta);
+          const y = 1.55 * Math.cos(theta);
+          const x = rad * side;
+          pts.push(new THREE.Vector3(x, y, 0));
+        }
+        lines.push(pts);
+      });
+    });
+    return lines;
+  }, []);
+
+  const [vanAllenPos, vanAllenColors] = useMemo(() => {
+    const count = 1200;
+    const pos = new Float32Array(count * 3);
+    const col = new Float32Array(count * 3);
+
+    const colorInner = new THREE.Color("#f97316");
+    const colorOuter = new THREE.Color("#38bdf8");
+
+    for (let i = 0; i < count; i++) {
+      const isInner = i < count * 0.45;
+      const baseR = isInner ? 1.9 : 2.7;
+      const spreadR = (Math.random() - 0.5) * (isInner ? 0.35 : 0.6);
+      const r = baseR + spreadR;
+      const theta = Math.random() * Math.PI * 2;
+      const y = (Math.random() - 0.5) * (isInner ? 0.3 : 0.5);
+
+      pos[i * 3] = Math.cos(theta) * r;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = Math.sin(theta) * r;
+
+      const c = isInner ? colorInner : colorOuter;
+      col[i * 3] = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
+    }
+
+    return [pos, col];
+  }, []);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    currentScale.current = THREE.MathUtils.lerp(currentScale.current, scaleTarget, 0.05);
+    groupRef.current.scale.set(currentScale.current, currentScale.current, currentScale.current);
+
+    if (bowShockRef.current) {
+      bowShockRef.current.lookAt(0, 0, 0);
+    }
+  });
+
+  if (!showBowShock && !showVanAllen) return null;
+
+  return (
+    <group ref={groupRef} raycast={() => null}>
+      {showBowShock && (
+        <>
+          <group ref={bowShockRef} raycast={() => null}>
+            <mesh position={[0, 0, 2.1]} raycast={() => null}>
+              <ringGeometry args={[2.0, 2.15, 64, 1, -Math.PI / 2.2, Math.PI * 0.9]} />
+              <meshBasicMaterial
+                color={isStorm ? "#ef4444" : "#38bdf8"}
+                transparent
+                opacity={isStorm ? 0.5 : 0.28}
+                side={THREE.DoubleSide}
+                blending={THREE.AdditiveBlending}
+                depthWrite={false}
+              />
+            </mesh>
+          </group>
+
+          <mesh position={[0, 1.52, 0]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+            <ringGeometry args={[0.18, 0.42, 32]} />
+            <meshBasicMaterial color={isStorm ? "#f43f5e" : "#10b981"} transparent opacity={0.5} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} />
+          </mesh>
+          <mesh position={[0, -1.52, 0]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+            <ringGeometry args={[0.18, 0.42, 32]} />
+            <meshBasicMaterial color={isStorm ? "#f43f5e" : "#10b981"} transparent opacity={0.5} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} />
+          </mesh>
+        </>
+      )}
+
+      {showVanAllen && (
+        <>
+          <points raycast={() => null}>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" count={vanAllenPos.length / 3} array={vanAllenPos} itemSize={3} />
+              <bufferAttribute attach="attributes-color" count={vanAllenColors.length / 3} array={vanAllenColors} itemSize={3} />
+            </bufferGeometry>
+            <pointsMaterial size={0.045} vertexColors transparent opacity={0.6} blending={THREE.AdditiveBlending} depthWrite={false} />
+          </points>
+
+          {magneticFieldLines.map((pts, idx) => (
+            <Line key={idx} points={pts} color={isStorm ? "#ef4444" : "#7dd3fc"} opacity={0.35} transparent lineWidth={0.9} raycast={() => null} />
+          ))}
+        </>
+      )}
+    </group>
+  );
+}
+
+// 9.1 RESSONÂNCIA DE SCHUMANN (7.83 Hz)
+function SchumannResonanceSphere({ 
+  show = false, 
+  timeScale = 1 
+}: { 
+  show?: boolean; 
+  timeScale?: number; 
+}) {
+  const shellRef = useRef<THREE.Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (!shellRef.current || !show) return;
+    const t = clock.getElapsedTime() * (timeScale === 0 ? 0 : Math.max(1, timeScale));
+    const pulse = 1.0 + Math.sin(t * 7.83) * 0.018;
+    shellRef.current.scale.set(pulse, pulse, pulse);
+    const mat = shellRef.current.material as THREE.MeshBasicMaterial;
+    mat.opacity = 0.15 + Math.sin(t * 7.83) * 0.08;
+  });
+
+  if (!show) return null;
+
+  return (
+    <mesh ref={shellRef} raycast={() => null}>
+      <sphereGeometry args={[1.56, 48, 48]} />
+      <meshBasicMaterial
+        color="#2dd4bf"
+        transparent
+        opacity={0.18}
+        side={THREE.DoubleSide}
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+        wireframe={true}
+      />
+    </mesh>
+  );
+}
+
+// 10. BASES E RADARES TERRESTRES
+function EarthRadarStationsLayer({
+  positionsRef,
+  earthWorldPos,
+  explodedMode = false,
+  showRadars = false,
+}: {
+  positionsRef: React.MutableRefObject<TargetPositions>;
+  earthWorldPos: THREE.Vector3;
+  explodedMode?: boolean;
+  showRadars?: boolean;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const scaleTarget = explodedMode ? 1.25 : 1.0;
+  const currentScale = useRef(1.0);
+
+  const radares = useMemo(() => [
+    { name: "Complexo de Comunicações Goldstone (DSN / NASA)", relPos: new THREE.Vector3(1.15, 0.8, 0.9) },
+    { name: "Radar Space Fence (Ilha Kwajalein / US Space Force)", relPos: new THREE.Vector3(-1.35, 0.2, 0.85) },
+    { name: "Radar Meteorológico Global GOES (NOAA / Flórida)", relPos: new THREE.Vector3(0.65, 0.9, 1.25) },
+  ], []);
+
+  useFrame(() => {
+    currentScale.current = THREE.MathUtils.lerp(currentScale.current, scaleTarget, 0.05);
+    if (groupRef.current) groupRef.current.scale.set(currentScale.current, currentScale.current, currentScale.current);
+
+    radares.forEach(r => {
+      positionsRef.current[r.name] = new THREE.Vector3(
+        earthWorldPos.x + r.relPos.x * currentScale.current,
+        earthWorldPos.y + r.relPos.y * currentScale.current,
+        earthWorldPos.z + r.relPos.z * currentScale.current
+      );
+    });
+  });
+
+  if (!showRadars) return null;
+
+  return (
+    <group ref={groupRef}>
+      {radares.map((rad) => (
+        <group key={rad.name} position={rad.relPos}>
+          <mesh raycast={() => null}>
+            <sphereGeometry args={[0.06, 12, 12]} />
+            <meshBasicMaterial color="#34d399" />
+          </mesh>
+          <pointLight color="#10b981" intensity={0.9} distance={0.8} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+// 11. RETÍCULO DO ALVO
+function SelectionReticle({ 
+  targetKey, 
+  targetRadius,
+  positionsRef 
+}: { 
+  targetKey: string; 
+  targetRadius: number;
+  positionsRef: React.MutableRefObject<TargetPositions>; 
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useFrame(({ camera, clock }) => {
+    if (!meshRef.current || targetKey === 'VisaoGeral') return;
+    const pos = positionsRef.current[targetKey];
+    if (pos) {
+      meshRef.current.position.copy(pos);
+      meshRef.current.lookAt(camera.position);
+      meshRef.current.rotation.z = clock.getElapsedTime() * 0.4;
+    }
+  });
+
+  if (targetKey === 'VisaoGeral') return null;
+
+  const ringRadius = Math.max(targetRadius * 1.35, 1.4);
+
+  return (
+    <mesh ref={meshRef} raycast={() => null}>
+      <ringGeometry args={[ringRadius, ringRadius + 0.05, 32]} />
+      <meshBasicMaterial color="#38bdf8" transparent opacity={0.6} blending={THREE.AdditiveBlending} depthWrite={false} />
+    </mesh>
+  );
+}
+
+// 12. CÂMERA DE VOO DIRETA COM ROTAÇÃO 360° TOTALMENTE LIVRE NO RATO
 function CameraFlightController({
   targetKey,
   targetRadius,
   positionsRef,
+  explodedMode = false,
+  isCardOpen = true,
 }: {
   targetKey: string;
   targetRadius: number;
   positionsRef: React.MutableRefObject<TargetPositions>;
+  explodedMode?: boolean;
+  isCardOpen?: boolean;
 }) {
   const controlsRef = useRef<any>(null);
   const activeKeyRef = useRef(targetKey);
   const isTransitioningRef = useRef(true);
+  const isUserInteractingRef = useRef(false);
+  const { camera, size } = useThree();
 
   const desiredDistance = useMemo(() => {
-    if (targetKey === 'VisaoGeral') return 74.0;
-    if (targetKey === 'Sol') return 11.0;
-    return Math.max(targetRadius * 3.4, 2.5);
-  }, [targetKey, targetRadius]);
+    if (targetKey === 'VisaoGeral') return 125.0;
+    if (targetKey === 'Sol') return 16.0;
+    if (targetKey === 'Terra') return explodedMode ? 9.0 : 5.4;
+    if (targetKey.includes('Galáxia') || targetKey.includes('Nuvem')) return Math.max(targetRadius * 3.4, 90.0);
+    if (targetRadius < 0.6) return Math.max(targetRadius * 3.0, 1.8);
+    return Math.max(targetRadius * 3.5, 4.5);
+  }, [targetKey, targetRadius, explodedMode]);
 
-  if (activeKeyRef.current !== targetKey) {
+  useEffect(() => {
+    const cam = camera as THREE.PerspectiveCamera;
+    if (targetKey === 'VisaoGeral' || !isCardOpen) {
+      cam.clearViewOffset();
+      cam.updateProjectionMatrix();
+    } else {
+      const isWidescreen = size.width > 768;
+      const cardWidth = isWidescreen ? Math.min(380, size.width * 0.35) : 0;
+      const offsetX = cardWidth / 2;
+      cam.setViewOffset(size.width, size.height, offsetX, 0, size.width, size.height);
+      cam.updateProjectionMatrix();
+    }
+  }, [targetKey, isCardOpen, size.width, size.height, camera]);
+
+  useEffect(() => {
     activeKeyRef.current = targetKey;
     isTransitioningRef.current = true;
-  }
+    isUserInteractingRef.current = false;
+  }, [targetKey, explodedMode, isCardOpen]);
 
-  useFrame(({ camera }) => {
+  useFrame((_, delta) => {
     if (!controlsRef.current) return;
     const controls = controlsRef.current;
-    const planetPos = positionsRef.current[targetKey] || new THREE.Vector3(0, 0, 0);
 
-    if (isTransitioningRef.current) {
-      controls.target.lerp(planetPos, 0.08);
+    const targetPos = targetKey === 'VisaoGeral'
+      ? new THREE.Vector3(0, 0, 0)
+      : (positionsRef.current[targetKey] || new THREE.Vector3(0, 0, 0));
 
-      const offset = camera.position.clone().sub(controls.target);
-      if (offset.lengthSq() === 0) offset.set(0, 0.6, 1);
-      offset.setLength(desiredDistance);
+    if (isTransitioningRef.current && !isUserInteractingRef.current) {
+      let idealCamPos: THREE.Vector3;
 
-      const targetCamPos = planetPos.clone().add(offset);
-      camera.position.lerp(targetCamPos, 0.08);
+      if (targetKey === 'VisaoGeral') {
+        idealCamPos = new THREE.Vector3(0, 85, 120);
+      } else {
+        let offsetDir: THREE.Vector3;
+        if (targetPos.lengthSq() < 0.001) {
+          offsetDir = new THREE.Vector3(0, 0.4, 1).normalize();
+        } else {
+          const sunDir = targetPos.clone().normalize().negate();
+          const up = new THREE.Vector3(0, 1, 0);
+          const tangent = new THREE.Vector3().crossVectors(up, targetPos.clone().normalize()).normalize();
+
+          offsetDir = new THREE.Vector3()
+            .addScaledVector(sunDir, 0.45)
+            .addScaledVector(tangent, 0.65)
+            .addScaledVector(up, 0.35)
+            .normalize();
+        }
+        idealCamPos = targetPos.clone().add(offsetDir.multiplyScalar(desiredDistance));
+      }
+
+      const factor = 1 - Math.exp(-3.5 * delta);
+      camera.position.lerp(idealCamPos, factor);
+      controls.target.lerp(targetPos, factor);
 
       if (
-        controls.target.distanceTo(planetPos) < 0.05 &&
-        Math.abs(camera.position.distanceTo(planetPos) - desiredDistance) < 0.1
+        camera.position.distanceTo(idealCamPos) < 0.25 &&
+        controls.target.distanceTo(targetPos) < 0.1
       ) {
         isTransitioningRef.current = false;
       }
     } else {
-      const shift = planetPos.clone().sub(controls.target);
-      controls.target.copy(planetPos);
-      camera.position.add(shift);
+      if (targetKey !== 'VisaoGeral') {
+        const deltaPos = targetPos.clone().sub(controls.target);
+        controls.target.copy(targetPos);
+        camera.position.add(deltaPos);
+      }
     }
 
     controls.update();
@@ -225,187 +1116,128 @@ function CameraFlightController({
       enableZoom={true}
       enablePan={false}
       minDistance={1.2}
-      maxDistance={350}
+      maxDistance={850}
       rotateSpeed={0.8}
       zoomSpeed={1.0}
       onStart={() => {
+        isUserInteractingRef.current = true;
         isTransitioningRef.current = false;
       }}
     />
   );
 }
 
-// Sol Central Incandescente
-function Sun({
-  onFocus,
-  positionsRef,
-}: {
-  onFocus: (key: string, radius: number) => void;
-  positionsRef: React.MutableRefObject<TargetPositions>;
-}) {
-  const sunMeshRef = useRef<THREE.Mesh>(null);
-  const flareRef = useRef<THREE.Mesh>(null);
-
-  const texture = useMemo(() => {
-    if (typeof window === 'undefined') return undefined;
-    return new THREE.TextureLoader().load(
-      'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/lava/lavatile.jpg'
-    );
-  }, []);
-
-  useFrame(({ clock }, delta) => {
-    positionsRef.current['Sol'] = new THREE.Vector3(0, 0, 0);
-    if (sunMeshRef.current) sunMeshRef.current.rotation.y += delta * 0.015;
-    if (flareRef.current) {
-      const s = 1.05 + Math.sin(clock.getElapsedTime() * 2) * 0.02;
-      flareRef.current.scale.set(s, s, s);
-    }
-  });
-
-  return (
-    <group position={[0, 0, 0]}>
-      <mesh
-        ref={sunMeshRef}
-        onClick={(e) => { e.stopPropagation(); onFocus('Sol', 2.3); }}
-        className="cursor-pointer"
-      >
-        <sphereGeometry args={[2.3, 48, 48]} />
-        <meshBasicMaterial map={texture} color="#ffde6a" />
-      </mesh>
-
-      <mesh ref={flareRef}>
-        <sphereGeometry args={[2.55, 32, 32]} />
-        <meshBasicMaterial color="#ff7b00" transparent opacity={0.32} blending={THREE.AdditiveBlending} />
-      </mesh>
-
-      <pointLight intensity={18.0} distance={250} decay={0.15} color="#ffffff" />
-    </group>
-  );
-}
-
-// Planetas do Sistema Solar
-function SolarPlanet({
-  name,
-  type,
-  radius,
-  orbitRadius,
-  speed,
-  initialAngle,
-  ring = false,
-  camadas,
-  onFocus,
-  positionsRef,
-}: {
-  name: string;
-  type: string;
-  radius: number;
-  orbitRadius: number;
-  speed: number;
-  initialAngle: number;
-  ring?: boolean;
-  camadas: CamadasConfig;
-  onFocus: (key: string, radius: number) => void;
-  positionsRef: React.MutableRefObject<TargetPositions>;
-}) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const texture = useMemo(() => createDetailedPlanetTexture(type), [type]);
-
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime() * speed + initialAngle;
-    const x = Math.cos(t) * orbitRadius;
-    const z = Math.sin(t) * orbitRadius;
-
-    positionsRef.current[name] = new THREE.Vector3(x, 0, z);
-
-    if (meshRef.current) {
-      meshRef.current.position.set(x, 0, z);
-      meshRef.current.rotation.y += 0.012;
-    }
-  });
-
-  return (
-    <group>
-      {camadas.orbitas && <OrbitRing radius={orbitRadius} />}
-
-      <mesh
-        ref={meshRef}
-        onClick={(e) => { e.stopPropagation(); onFocus(name, radius); }}
-        className="cursor-pointer"
-      >
-        <sphereGeometry args={[radius, 48, 48]} />
-        <meshStandardMaterial
-          map={texture}
-          roughness={0.65}
-          metalness={0.05}
-        />
-
-        {ring && (
-          <mesh rotation={[Math.PI / 2.35, 0.2, 0]}>
-            <ringGeometry args={[radius * 1.35, radius * 2.45, 64]} />
-            <meshStandardMaterial
-              color="#e2d4b7"
-              side={THREE.DoubleSide}
-              transparent
-              opacity={0.85}
-              roughness={0.7}
-            />
-          </mesh>
-        )}
-
-        <Html distanceFactor={15} position={[0, radius + 0.6, 0]}>
-          <div className="bg-slate-950/85 border border-cyan-500/40 px-2 py-0.5 rounded text-[10px] font-mono text-cyan-300 pointer-events-none whitespace-nowrap shadow-md">
-            {name}
-          </div>
-        </Html>
-      </mesh>
-    </group>
-  );
-}
-
-// Terra e Lua
+// 13. SISTEMA TERRA
 function EarthSystem({
   camadas,
+  timeScale,
   onFocus,
   positionsRef,
+  kpIndex = 2,
+  explodedMode = false,
+  earthLayers,
 }: {
   camadas: CamadasConfig;
-  onFocus: (key: string, radius: number) => void;
+  timeScale: number;
+  onFocus: (info: TargetInfo) => void;
   positionsRef: React.MutableRefObject<TargetPositions>;
+  kpIndex?: number;
+  explodedMode?: boolean;
+  earthLayers?: EarthLayersInspector;
 }) {
-  const earthOrbitRadius = 12.0;
+  const earthOrbitRadius = 16.0;
   const systemRef = useRef<THREE.Group>(null);
   const earthMeshRef = useRef<THREE.Mesh>(null);
   const moonMeshRef = useRef<THREE.Mesh>(null);
+  const [earthPos, setEarthPos] = useState(new THREE.Vector3(16, 0, 0));
 
-  const [colorMap, normalMap, moonMap] = useMemo(() => {
-    if (typeof window === 'undefined') return [null, null, null];
-    const loader = new THREE.TextureLoader();
-    return [
-      loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg'),
-      loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg'),
-      loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/moon_1024.jpg'),
-    ];
-  }, []);
+  const [dayMap, normalMap, lightsMap, moonMap] = useTexture([
+    PLANET_TEXTURES.earthDay,
+    PLANET_TEXTURES.earthNormal,
+    PLANET_TEXTURES.earthLights,
+    PLANET_TEXTURES.moon,
+  ]);
+
+  const satelites = useMemo(() => [
+    {
+      name: "GOES-16 (Satélite Meteorológico)",
+      alt: 3.2,
+      speed: 0.05,
+      incl: 0.05,
+      radius: 0.45,
+      diameter: "6 metros",
+      speedKmh: 11050,
+      distanceKm: "35.786 km (Geoestacionário)",
+      orbitalPeriod: "24 horas",
+      details: "Satélite geoestacionário da NOAA para previsão de clima severo e monitoramento solar.",
+      imageUrl: "https://images-assets.nasa.gov/image/PIA18033/PIA18033~orig.jpg"
+    },
+    {
+      name: "Telescópio Espacial Hubble",
+      alt: 2.2,
+      speed: 0.12,
+      incl: -0.35,
+      radius: 0.45,
+      diameter: "13,2 metros",
+      speedKmh: 27300,
+      distanceKm: "540 km da Terra",
+      orbitalPeriod: "95 min",
+      details: "Observatório em órbita baixa responsável por imagens profundas do cosmos.",
+      imageUrl: "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001465/GSFC_20171208_Archive_e001465~orig.jpg"
+    },
+    {
+      name: "ISS (Estação Espacial Internacional)",
+      alt: 1.95,
+      speed: 0.16,
+      incl: 0.42,
+      radius: 0.45,
+      diameter: "109 metros",
+      speedKmh: 27600,
+      distanceKm: "420 km da Terra",
+      orbitalPeriod: "92 min",
+      details: "Estação orbital habitada permanentemente em microgravidade na órbita baixa.",
+      imageUrl: "https://images-assets.nasa.gov/image/iss065e084297/iss065e084297~orig.jpg"
+    }
+  ], []);
 
   useFrame(({ clock }, delta) => {
-    const t = clock.getElapsedTime() * 0.04 + 1.2;
+    const t = (clock.getElapsedTime() * timeScale) * 0.012 + 1.2;
     const x = Math.cos(t) * earthOrbitRadius;
     const z = Math.sin(t) * earthOrbitRadius;
 
-    positionsRef.current['Terra'] = new THREE.Vector3(x, 0, z);
+    const currentPos = new THREE.Vector3(x, 0, z);
+    positionsRef.current['Terra'] = currentPos;
+    setEarthPos(currentPos);
 
     if (systemRef.current) {
       systemRef.current.position.set(x, 0, z);
     }
-    if (earthMeshRef.current) earthMeshRef.current.rotation.y += delta * 0.03;
+    
+    if (earthMeshRef.current) {
+      earthMeshRef.current.rotation.y += delta * 0.015 * timeScale;
+    }
 
     if (moonMeshRef.current) {
-      const mt = clock.getElapsedTime() * 0.25;
-      const mx = Math.cos(mt) * 2.6;
-      const mz = Math.sin(mt) * 2.6;
-      moonMeshRef.current.position.set(mx, 0, mz);
-      positionsRef.current['Lua'] = new THREE.Vector3(x + mx, 0, z + mz);
+      const moonDist = explodedMode ? 5.8 : 3.8;
+      const mt = (clock.getElapsedTime() * timeScale) * 0.08;
+      const mx = Math.cos(mt) * moonDist;
+      const my = Math.sin(mt) * (moonDist * 0.08);
+      const mz = Math.sin(mt) * moonDist;
+      moonMeshRef.current.position.set(mx, my, mz);
+      moonMeshRef.current.rotation.y += delta * 0.015 * timeScale;
+      
+      positionsRef.current['Lua'] = new THREE.Vector3(x + mx, my, z + mz);
     }
+
+    satelites.forEach((sat, i) => {
+      const st = (clock.getElapsedTime() * timeScale) * sat.speed + i * 1.8;
+      const effectiveAlt = sat.alt * (explodedMode ? 1.4 : 1.0);
+      const sx = Math.cos(st) * effectiveAlt;
+      const sy = Math.sin(st) * Math.sin(sat.incl) * effectiveAlt;
+      const sz = Math.sin(st) * Math.cos(sat.incl) * effectiveAlt;
+
+      positionsRef.current[sat.name] = new THREE.Vector3(x + sx, sy, z + sz);
+    });
   });
 
   return (
@@ -413,271 +1245,493 @@ function EarthSystem({
       {camadas.orbitas && <OrbitRing radius={earthOrbitRadius} />}
 
       <group ref={systemRef}>
-        <group onClick={(e) => { e.stopPropagation(); onFocus('Terra', 1.5); }} className="cursor-pointer">
-          <mesh ref={earthMeshRef}>
+        <group
+          onClick={(e) => {
+            e.stopPropagation();
+            onFocus({
+              name: 'Terra',
+              type: 'Planeta',
+              radius: 1.5,
+              diameter: '12.742 km',
+              distanceKm: '149,6M km (1 UA)',
+              orbitalPeriod: '365,25 dias',
+              gravity: '9,8 m/s²',
+              details: 'Oásis biológico com oceanos de água líquida e vida em abundância.',
+              imageUrl: 'https://images-assets.nasa.gov/image/as17-148-22727/as17-148-22727~orig.jpg'
+            });
+          }}
+          className="cursor-pointer"
+        >
+          <mesh ref={earthMeshRef} rotation={[0, -Math.PI / 2, 0]}>
             <sphereGeometry args={[1.5, 64, 64]} />
             <meshStandardMaterial
-              map={colorMap || undefined}
-              normalMap={normalMap || undefined}
-              color={colorMap ? '#ffffff' : '#2563eb'}
+              map={dayMap}
+              normalMap={normalMap}
               roughness={0.65}
-              metalness={0.1}
+              metalness={0.05}
+              emissiveMap={lightsMap}
+              emissive="#ffbe53"
+              emissiveIntensity={0.55}
             />
           </mesh>
-          <Html distanceFactor={14} position={[0, 2.0, 0]}>
-            <div className="bg-slate-950/80 border border-cyan-400 px-2 py-0.5 rounded text-[10px] font-mono text-cyan-300 pointer-events-none whitespace-nowrap shadow-md">
-              Terra
-            </div>
-          </Html>
+
+          <mesh raycast={() => null}>
+            <sphereGeometry args={[1.52, 64, 64]} />
+            <meshBasicMaterial
+              color="#38bdf8"
+              transparent
+              opacity={0.1}
+              side={THREE.BackSide}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </mesh>
         </group>
+
+        <EarthMagnetosphere 
+          kpIndex={kpIndex} 
+          explodedMode={explodedMode}
+          showBowShock={earthLayers?.bowShock ?? false}
+          showVanAllen={earthLayers?.vanAllen ?? false}
+        />
+
+        <SchumannResonanceSphere 
+          show={earthLayers?.schumann ?? false} 
+          timeScale={timeScale} 
+        />
+
+        {earthLayers?.satellitesLeo && satelites.map((sat, i) => (
+          <SingleEarthSatelliteMesh
+            key={sat.name}
+            sat={sat}
+            index={i}
+            timeScale={timeScale}
+            onFocus={onFocus}
+            explodedMode={explodedMode}
+          />
+        ))}
+
+        <EarthRadarStationsLayer
+          positionsRef={positionsRef}
+          earthWorldPos={earthPos}
+          explodedMode={explodedMode}
+          showRadars={earthLayers?.radarsGround ?? false}
+        />
 
         <mesh
           ref={moonMeshRef}
-          onClick={(e) => { e.stopPropagation(); onFocus('Lua', 0.36); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onFocus({
+              name: 'Lua',
+              type: 'Lua',
+              radius: 0.36,
+              diameter: '3.474 km',
+              distanceKm: '384.400 km da Terra',
+              orbitalPeriod: '27,3 dias',
+              gravity: '1,62 m/s²',
+              details: 'Satélite natural terrestre em acoplamento de maré.',
+              imageUrl: 'https://images-assets.nasa.gov/image/PIA00405/PIA00405~orig.jpg'
+            });
+          }}
           className="cursor-pointer"
         >
           <sphereGeometry args={[0.36, 32, 32]} />
-          <meshStandardMaterial map={moonMap || undefined} color="#cbd5e1" roughness={0.9} />
-          <Html distanceFactor={10} position={[0, 0.55, 0]}>
-            <div className="bg-slate-950/80 border border-slate-600 px-1.5 py-0.5 rounded text-[9px] font-mono text-slate-300 pointer-events-none whitespace-nowrap">
-              Lua
-            </div>
-          </Html>
+          <meshStandardMaterial 
+            map={moonMap} 
+            color="#cbd5e1" 
+            roughness={0.92} 
+            metalness={0.0}
+          />
         </mesh>
       </group>
     </group>
   );
 }
 
-// Sondas Espaciais
-function DeepSpaceProbes({
+function SingleEarthSatelliteMesh({
+  sat,
+  index,
+  timeScale,
   onFocus,
-  positionsRef,
+  explodedMode = false,
 }: {
-  onFocus: (key: string, radius: number) => void;
-  positionsRef: React.MutableRefObject<TargetPositions>;
+  sat: any;
+  index: number;
+  timeScale: number;
+  onFocus: (info: TargetInfo) => void;
+  explodedMode?: boolean;
 }) {
-  const jwstPos = useMemo(() => new THREE.Vector3(-14.2, 0.8, 0), []);
-  const voyagerPos = useMemo(() => new THREE.Vector3(38.0, 8.0, -22.0), []);
+  const meshRef = useRef<THREE.Mesh>(null);
+  const effectiveAlt = sat.alt * (explodedMode ? 1.4 : 1.0);
 
-  useFrame(() => {
-    positionsRef.current['JWST'] = jwstPos;
-    positionsRef.current['Voyager 1'] = voyagerPos;
+  useFrame(({ clock }) => {
+    const t = (clock.getElapsedTime() * timeScale) * sat.speed + index * 1.8;
+    const sx = Math.cos(t) * effectiveAlt;
+    const sy = Math.sin(t) * Math.sin(sat.incl) * effectiveAlt;
+    const sz = Math.sin(t) * Math.cos(sat.incl) * effectiveAlt;
+
+    if (meshRef.current) {
+      meshRef.current.position.set(sx, sy, sz);
+    }
   });
 
   return (
-    <>
-      <group position={[jwstPos.x, jwstPos.y, jwstPos.z]}>
-        <group onClick={(e) => { e.stopPropagation(); onFocus('JWST', 0.6); }} className="cursor-pointer">
-          <mesh rotation={[0.4, 0.3, 0]}>
-            <boxGeometry args={[0.2, 0.003, 0.11]} />
-            <meshStandardMaterial color="#cbd5e1" metalness={0.95} roughness={0.1} />
-          </mesh>
-          <mesh position={[0, 0.03, 0]} rotation={[0.4, 0.3, 0]}>
-            <cylinderGeometry args={[0.05, 0.05, 0.005, 6]} />
-            <meshStandardMaterial color="#f59e0b" metalness={1.0} roughness={0.05} />
-          </mesh>
-          <pointLight color="#f59e0b" intensity={2.0} distance={1.0} />
-          <Html distanceFactor={12} position={[0, 0.35, 0]}>
-            <div className="bg-slate-950/80 border border-yellow-500/50 px-2 py-0.5 rounded text-[10px] font-mono text-yellow-300 pointer-events-none whitespace-nowrap shadow-md">
-              JWST • L2
-            </div>
-          </Html>
-        </group>
-      </group>
-
-      <group position={[voyagerPos.x, voyagerPos.y, voyagerPos.z]}>
-        <group onClick={(e) => { e.stopPropagation(); onFocus('Voyager 1', 0.8); }} className="cursor-pointer">
-          <mesh rotation={[0.6, -0.4, 0]}>
-            <cylinderGeometry args={[0.14, 0.01, 0.04, 16]} />
-            <meshStandardMaterial color="#f8fafc" roughness={0.3} />
-          </mesh>
-          <mesh position={[0, -0.05, 0]}>
-            <boxGeometry args={[0.05, 0.06, 0.05]} />
-            <meshStandardMaterial color="#64748b" metalness={0.8} />
-          </mesh>
-          <pointLight color="#38bdf8" intensity={1.5} distance={1.2} />
-          <Html distanceFactor={14} position={[0, 0.45, 0]}>
-            <div className="bg-slate-950/80 border border-indigo-500/50 px-2 py-0.5 rounded text-[10px] font-mono text-indigo-300 pointer-events-none whitespace-nowrap shadow-md">
-              Voyager 1 • Interestelar
-            </div>
-          </Html>
-        </group>
-      </group>
-    </>
+    <mesh
+      ref={meshRef}
+      onClick={(e) => {
+        e.stopPropagation();
+        onFocus(sat);
+      }}
+      className="cursor-pointer"
+    >
+      <sphereGeometry args={[0.07, 16, 16]} />
+      <meshBasicMaterial color="#38bdf8" />
+    </mesh>
   );
 }
 
-// Cinturão de Asteroides
-function AsteroidsLayer({
-  asteroides,
+// 14. PLANETAS
+function SolarPlanet({
+  planet,
+  camadas,
+  timeScale,
   onFocus,
   positionsRef,
 }: {
-  asteroides: any[];
-  onFocus: (key: string, radius: number) => void;
-  positionsRef: React.MutableRefObject<TargetPositions>;
-}) {
-  return (
-    <>
-      {asteroides.map((ast, i) => {
-        const orbitRadius = 18.0 + (i * 0.65);
-        const speed = (ast.velocity_kmh / 120000) * 0.12 + 0.02;
-        const isHazardous = ast.is_potentially_hazardous_asteroid;
-
-        return (
-          <AsteroidSingle
-            key={ast.id || i}
-            ast={ast}
-            orbitRadius={orbitRadius}
-            speed={speed}
-            index={i}
-            total={asteroides.length}
-            isHazardous={isHazardous}
-            onFocus={onFocus}
-            positionsRef={positionsRef}
-          />
-        );
-      })}
-    </>
-  );
-}
-
-function AsteroidSingle({
-  ast,
-  orbitRadius,
-  speed,
-  index,
-  total,
-  isHazardous,
-  onFocus,
-  positionsRef,
-}: {
-  ast: any;
-  orbitRadius: number;
-  speed: number;
-  index: number;
-  total: number;
-  isHazardous: boolean;
-  onFocus: (key: string, radius: number) => void;
+  planet: any;
+  camadas: CamadasConfig;
+  timeScale: number;
+  onFocus: (info: TargetInfo) => void;
   positionsRef: React.MutableRefObject<TargetPositions>;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
+  const texture = useTexture(planet.textureUrl);
+  const ringTexture = useTexture(planet.ringTextureUrl || PLANET_TEXTURES.saturnRing);
 
   useFrame(({ clock }) => {
-    const t = clock.getElapsedTime() * speed + index * ((Math.PI * 2) / total);
-    const x = Math.cos(t) * orbitRadius;
-    const y = Math.sin(t) * 0.4 * Math.sin(index + 1);
-    const z = Math.sin(t) * orbitRadius;
+    const t = (clock.getElapsedTime() * timeScale) * planet.speed + planet.initialAngle;
+    const x = Math.cos(t) * planet.dist;
+    const z = Math.sin(t) * planet.dist;
 
-    positionsRef.current[ast.name] = new THREE.Vector3(x, y, z);
+    positionsRef.current[planet.name] = new THREE.Vector3(x, 0, z);
 
     if (meshRef.current) {
-      meshRef.current.position.set(x, y, z);
-      meshRef.current.rotation.x += 0.01;
-      meshRef.current.rotation.y += 0.015;
+      meshRef.current.position.set(x, 0, z);
+      meshRef.current.rotation.y += 0.006;
     }
   });
 
   return (
     <group>
+      {camadas.orbitas && <OrbitRing radius={planet.dist} />}
+
       <mesh
         ref={meshRef}
-        onClick={(e) => { e.stopPropagation(); onFocus(ast.name, 0.4); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onFocus({
+            name: planet.name,
+            type: 'Planeta',
+            radius: planet.radius,
+            diameter: planet.diameter,
+            distanceKm: planet.distanceKm,
+            orbitalPeriod: planet.orbitalPeriod,
+            gravity: planet.gravity,
+            details: planet.details,
+            imageUrl: planet.previewUrl,
+          });
+        }}
         className="cursor-pointer"
       >
-        <dodecahedronGeometry args={[0.12, 0]} />
-        <meshStandardMaterial color="#94a3b8" roughness={0.8} metalness={0.2} />
-        <Html distanceFactor={14} position={[0, 0.25, 0]}>
-          <div className={`px-2 py-0.5 rounded text-[10px] font-mono whitespace-nowrap shadow-md border pointer-events-none ${
-            isHazardous ? "bg-red-950/80 border-red-500/60 text-red-200" : "bg-slate-950/80 border-cyan-500/40 text-cyan-200"
-          }`}>
-            {ast.name}
-          </div>
-        </Html>
+        <sphereGeometry args={[planet.radius, 64, 64]} />
+        <meshStandardMaterial 
+          map={texture} 
+          roughness={planet.roughness ?? 0.7} 
+          metalness={0.02} 
+        />
+
+        {planet.ring && (
+          <mesh rotation={[Math.PI / 2.35, 0.2, 0]} raycast={() => null}>
+            <ringGeometry args={[planet.radius * 1.35, planet.radius * 2.45, 64]} />
+            <meshStandardMaterial 
+              map={ringTexture}
+              side={THREE.DoubleSide} 
+              transparent 
+              opacity={0.85} 
+              roughness={0.6} 
+            />
+          </mesh>
+        )}
       </mesh>
     </group>
   );
 }
 
-// Cena Principal
+// 15. VOYAGER 1
+function DeepSpaceProbes({
+  onFocus,
+  positionsRef,
+}: {
+  onFocus: (info: TargetInfo) => void;
+  positionsRef: React.MutableRefObject<TargetPositions>;
+}) {
+  const voyagerPos = useMemo(() => new THREE.Vector3(55.0, 12.0, -32.0), []);
+
+  useFrame(() => {
+    positionsRef.current['Voyager 1'] = voyagerPos;
+  });
+
+  const voyagerData: TargetInfo = {
+    name: 'Voyager 1',
+    type: 'Sonda',
+    radius: 0.8,
+    diameter: 'Antena HGA: 3,7 m',
+    distanceKm: '24 Bilhões km (160+ UA)',
+    speedKmh: 61200,
+    details: 'O artefato humano mais distante da Terra, cruzando o meio interestelar além da heliosfera.',
+    imageUrl: 'https://images-assets.nasa.gov/image/PIA01482/PIA01482~orig.jpg'
+  };
+
+  return (
+    <group position={[voyagerPos.x, voyagerPos.y, voyagerPos.z]}>
+      <group
+        onClick={(e) => {
+          e.stopPropagation();
+          onFocus(voyagerData);
+        }}
+        className="cursor-pointer"
+      >
+        <mesh rotation={[0.6, -0.4, 0]}>
+          <cylinderGeometry args={[0.16, 0.01, 0.05, 16]} />
+          <meshStandardMaterial color="#f8fafc" roughness={0.3} />
+        </mesh>
+        <pointLight color="#38bdf8" intensity={1.5} distance={1.5} />
+      </group>
+    </group>
+  );
+}
+
 export default function Scene3D({
   asteroides = [],
-  camadas = { orbitas: true, alinhamento: true, asteroides: true, planetas: true },
+  camadas = { 
+    orbitas: false, 
+    miraAlvo: false, 
+    ventoSolar: true, 
+    planetas: true, 
+    satelites: true, 
+    radaresTerra: false, 
+    galaxias: true, 
+    constelacoes: false, 
+    asteroides: true 
+  },
+  timeScale = 1,
+  selectedTarget = null,
+  onSelectTarget,
+  spaceWeather,
+  explodedMode = false,
+  earthLayers,
+  isCardOpen = true,
 }: {
   asteroides?: any[];
   camadas?: CamadasConfig;
+  timeScale?: number;
+  selectedTarget?: TargetInfo | null;
+  onSelectTarget?: (info: TargetInfo | null) => void;
+  spaceWeather?: SpaceWeatherData;
+  explodedMode?: boolean;
+  earthLayers?: EarthLayersInspector;
+  isCardOpen?: boolean;
 }) {
-  const [activeTarget, setActiveTarget] = useState<{ key: string; radius: number }>({
-    key: "VisaoGeral",
-    radius: 20.0,
-  });
+  const currentKey = selectedTarget ? selectedTarget.name : "VisaoGeral";
+  const currentRadius = selectedTarget ? selectedTarget.radius : 20.0;
 
   const positionsRef = useRef<TargetPositions>({
     'VisaoGeral': new THREE.Vector3(0, 0, 0),
   });
 
-  const handleFocus = (key: string, radius: number) => {
-    setActiveTarget({ key, radius });
+  const handleFocus = (info: TargetInfo | null) => {
+    if (onSelectTarget) onSelectTarget(info);
   };
 
   const planetasCatalogo = useMemo(() => [
-    { name: "Mercúrio", type: 'mercury', radius: 0.45, dist: 6.2, speed: 0.12, initialAngle: 0.5 },
-    { name: "Vénus", type: 'venus', radius: 0.8, dist: 9.0, speed: 0.07, initialAngle: 2.1 },
-    { name: "Marte", type: 'mars', radius: 0.75, dist: 15.2, speed: 0.03, initialAngle: 4.2 },
-    { name: "Júpiter", type: 'jupiter', radius: 2.5, dist: 24.5, speed: 0.015, initialAngle: 1.0 },
-    { name: "Saturno", type: 'saturn', radius: 2.0, dist: 32.0, speed: 0.01, initialAngle: 3.5, ring: true },
-    { name: "Úrano", type: 'uranus', radius: 1.3, dist: 39.0, speed: 0.007, initialAngle: 5.0 },
-    { name: "Neptuno", type: 'neptune', radius: 1.3, dist: 46.0, speed: 0.005, initialAngle: 0.8 },
+    { 
+      name: "Mercúrio", 
+      radius: 0.45, 
+      dist: 7.0, 
+      speed: 0.04, 
+      initialAngle: 0.5, 
+      diameter: '4.879 km', 
+      distanceKm: '57,9M km', 
+      orbitalPeriod: '88 dias', 
+      gravity: '3,7 m/s²', 
+      details: 'Superfície densamente craterada fotografada pela sonda MESSENGER.',
+      textureUrl: PLANET_TEXTURES.mercury,
+      previewUrl: 'https://images-assets.nasa.gov/image/PIA15190/PIA15190~orig.jpg',
+      roughness: 0.95
+    },
+    { 
+      name: "Vénus", 
+      radius: 0.8, 
+      dist: 11.2, 
+      speed: 0.024, 
+      initialAngle: 2.1, 
+      diameter: '12.104 km', 
+      distanceKm: '108,2M km', 
+      orbitalPeriod: '225 dias', 
+      gravity: '8,87 m/s²', 
+      details: 'Manto perpétuo de nuvens de ácido sulfúrico em tons de ocre.',
+      textureUrl: PLANET_TEXTURES.venus,
+      previewUrl: 'https://images-assets.nasa.gov/image/PIA00271/PIA00271~orig.jpg',
+      roughness: 0.4
+    },
+    { 
+      name: "Marte", 
+      radius: 0.68, 
+      dist: 22.0, 
+      speed: 0.009, 
+      initialAngle: 4.2, 
+      diameter: '6.779 km', 
+      distanceKm: '227,9M km', 
+      orbitalPeriod: '687 dias', 
+      gravity: '3,72 m/s²', 
+      details: 'Planeta Vermelho com calotas de gelo e desfiladeiros mapeados pela Viking.',
+      textureUrl: PLANET_TEXTURES.mars,
+      previewUrl: 'https://images-assets.nasa.gov/image/PIA04304/PIA04304~orig.jpg',
+      roughness: 0.88
+    },
+    { 
+      name: "Júpiter", 
+      radius: 2.3, 
+      dist: 36.0, 
+      speed: 0.004, 
+      initialAngle: 1.0, 
+      diameter: '139.820 km', 
+      distanceKm: '778,5M km', 
+      orbitalPeriod: '11,8 anos', 
+      gravity: '24,79 m/s²', 
+      details: 'Gigante gasoso com faixas zonais e a Grande Mancha Vermelha.',
+      textureUrl: PLANET_TEXTURES.jupiter,
+      previewUrl: 'https://images-assets.nasa.gov/image/PIA02873/PIA02873~orig.jpg',
+      roughness: 0.5
+    },
+    { 
+      name: "Saturno", 
+      radius: 1.85, 
+      dist: 48.0, 
+      speed: 0.0028, 
+      initialAngle: 3.5, 
+      ring: true, 
+      diameter: '116.460 km', 
+      distanceKm: '1,43 Bilhão km', 
+      orbitalPeriod: '29,4 anos', 
+      gravity: '10,44 m/s²', 
+      details: 'Gigante gasoso dourado envolto no mais brilhante sistema de anéis.',
+      textureUrl: PLANET_TEXTURES.saturn,
+      ringTextureUrl: PLANET_TEXTURES.saturnRing,
+      previewUrl: 'https://images-assets.nasa.gov/image/PIA01482/PIA01482~orig.jpg',
+      roughness: 0.6
+    },
+    { 
+      name: "Úrano", 
+      radius: 1.25, 
+      dist: 60.0, 
+      speed: 0.0018, 
+      initialAngle: 5.0, 
+      diameter: '50.724 km', 
+      distanceKm: '2,87 Bilhões km', 
+      orbitalPeriod: '84 anos', 
+      gravity: '8,69 m/s²', 
+      details: 'Gigante de gelo com atmosfera de metano gerando cor ciano pálida.',
+      textureUrl: PLANET_TEXTURES.uranus,
+      previewUrl: 'https://images-assets.nasa.gov/image/PIA18182/PIA18182~orig.jpg',
+      roughness: 0.3
+    },
+    { 
+      name: "Neptuno", 
+      radius: 1.25, 
+      dist: 72.0, 
+      speed: 0.0012, 
+      initialAngle: 0.8, 
+      diameter: '49.244 km', 
+      distanceKm: '4,5 Bilhões km', 
+      orbitalPeriod: '164,8 anos', 
+      gravity: '11,15 m/s²', 
+      details: 'Mundo azul ultramarino profundo com tempestades supersónicas.',
+      textureUrl: PLANET_TEXTURES.neptune,
+      previewUrl: 'https://images-assets.nasa.gov/image/PIA01492/PIA01492~orig.jpg',
+      roughness: 0.25
+    },
   ], []);
 
   return (
-    <div className="fixed inset-0 w-full h-full z-0 bg-[#020617]">
-      <div className="absolute top-24 left-6 z-20 pointer-events-auto">
-        <button
-          onClick={() => handleFocus('VisaoGeral', 20.0)}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-mono border backdrop-blur-md transition-all shadow-xl flex items-center gap-2 ${
-            activeTarget.key === 'VisaoGeral'
-              ? "bg-cyan-500/20 border-cyan-400 text-cyan-300 font-bold"
-              : "bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700"
-          }`}
-        >
-          <span>🌌</span>
-          <span>Visão Geral do Sistema</span>
-        </button>
-      </div>
+    <div className="fixed inset-0 w-full h-full z-0 bg-transparent">
+      <Canvas 
+        camera={{ position: [0, 85, 120], fov: 45, near: 0.05, far: 2000 }} 
+        gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
+      >
+        <Stars radius={300} depth={100} count={6500} factor={4} saturation={0.5} fade speed={1.0} />
 
-      <Canvas camera={{ position: [0, 52, 75], fov: 45 }}>
-        <Stars radius={300} depth={100} count={9000} factor={4} saturation={0} fade speed={1.2} />
-
-        <ambientLight intensity={0.65} />
-        <directionalLight position={[0, 40, 20]} intensity={0.7} color="#ffffff" />
+        <ambientLight intensity={0.25} />
+        <hemisphereLight groundColor="#0f172a" color="#94a3b8" intensity={0.4} />
 
         <CameraFlightController
-          targetKey={activeTarget.key}
-          targetRadius={activeTarget.radius}
+          targetKey={currentKey}
+          targetRadius={currentRadius}
           positionsRef={positionsRef}
+          explodedMode={explodedMode}
+          isCardOpen={isCardOpen}
         />
 
-        <Sun onFocus={handleFocus} positionsRef={positionsRef} />
+        {camadas.miraAlvo && (
+          <SelectionReticle 
+            targetKey={currentKey} 
+            targetRadius={currentRadius}
+            positionsRef={positionsRef} 
+          />
+        )}
+
+        <RealisticSun onFocus={handleFocus} positionsRef={positionsRef} />
+
+        {camadas.ventoSolar && (
+          <SolarElectromagneticWave 
+            kpIndex={spaceWeather?.kpIndex} 
+            windSpeed={spaceWeather?.solarWindSpeedKmS} 
+            timeScale={timeScale}
+          />
+        )}
+
+        {camadas.galaxias && (
+          <NearbyGalaxies onFocus={handleFocus} positionsRef={positionsRef} />
+        )}
+
+        {camadas.asteroides && (
+          <AsteroidsTrackingSystem 
+            asteroides={asteroides}
+            timeScale={timeScale}
+            onFocus={handleFocus}
+            positionsRef={positionsRef}
+            selectedTargetName={selectedTarget?.name}
+            showOrbits={camadas.orbitas}
+          />
+        )}
 
         <EarthSystem
           camadas={camadas}
+          timeScale={timeScale}
           onFocus={handleFocus}
           positionsRef={positionsRef}
+          kpIndex={spaceWeather?.kpIndex}
+          explodedMode={explodedMode}
+          earthLayers={earthLayers}
         />
 
         {camadas.planetas && planetasCatalogo.map((p) => (
           <SolarPlanet
             key={p.name}
-            name={p.name}
-            type={p.type}
-            radius={p.radius}
-            orbitRadius={p.dist}
-            speed={p.speed}
-            initialAngle={p.initialAngle}
-            ring={p.ring}
+            planet={p}
             camadas={camadas}
+            timeScale={timeScale}
             onFocus={handleFocus}
             positionsRef={positionsRef}
           />
@@ -685,13 +1739,11 @@ export default function Scene3D({
 
         <DeepSpaceProbes onFocus={handleFocus} positionsRef={positionsRef} />
 
-        {camadas.asteroides && (
-          <AsteroidsLayer
-            asteroides={asteroides}
-            onFocus={handleFocus}
-            positionsRef={positionsRef}
-          />
-        )}
+        <EffectComposer multisampling={4}>
+          <Bloom luminanceThreshold={1.2} luminanceSmoothing={0.3} intensity={0.7} radius={0.65} />
+          <ToneMapping />
+          <Vignette eskil={false} offset={0.12} darkness={0.9} />
+        </EffectComposer>
       </Canvas>
     </div>
   );
