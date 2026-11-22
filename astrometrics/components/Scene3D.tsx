@@ -1156,7 +1156,7 @@ function EarthSystem({
     PLANET_TEXTURES.earthNormal,
     PLANET_TEXTURES.earthLights,
     PLANET_TEXTURES.moon,
-  ]);
+  ]) as THREE.Texture[];
 
   const satelites = useMemo(() => [
     {
@@ -1212,7 +1212,7 @@ function EarthSystem({
     if (systemRef.current) {
       systemRef.current.position.set(x, 0, z);
     }
-    
+
     if (earthMeshRef.current) {
       earthMeshRef.current.rotation.y += delta * 0.015 * timeScale;
     }
@@ -1225,7 +1225,7 @@ function EarthSystem({
       const mz = Math.sin(mt) * moonDist;
       moonMeshRef.current.position.set(mx, my, mz);
       moonMeshRef.current.rotation.y += delta * 0.015 * timeScale;
-      
+
       positionsRef.current['Lua'] = new THREE.Vector3(x + mx, my, z + mz);
     }
 
@@ -1260,7 +1260,6 @@ function EarthSystem({
               imageUrl: 'https://images-assets.nasa.gov/image/as17-148-22727/as17-148-22727~orig.jpg'
             });
           }}
-          className="cursor-pointer"
         >
           <mesh ref={earthMeshRef} rotation={[0, -Math.PI / 2, 0]}>
             <sphereGeometry args={[1.5, 64, 64]} />
@@ -1288,16 +1287,16 @@ function EarthSystem({
           </mesh>
         </group>
 
-        <EarthMagnetosphere 
-          kpIndex={kpIndex} 
+        <EarthMagnetosphere
+          kpIndex={kpIndex}
           explodedMode={explodedMode}
           showBowShock={earthLayers?.bowShock ?? false}
           showVanAllen={earthLayers?.vanAllen ?? false}
         />
 
-        <SchumannResonanceSphere 
-          show={earthLayers?.schumann ?? false} 
-          timeScale={timeScale} 
+        <SchumannResonanceSphere
+          show={earthLayers?.schumann ?? false}
+          timeScale={timeScale}
         />
 
         {earthLayers?.satellitesLeo && satelites.map((sat, i) => (
@@ -1334,13 +1333,12 @@ function EarthSystem({
               imageUrl: 'https://images-assets.nasa.gov/image/PIA00405/PIA00405~orig.jpg'
             });
           }}
-          className="cursor-pointer"
         >
           <sphereGeometry args={[0.36, 32, 32]} />
-          <meshStandardMaterial 
-            map={moonMap} 
-            color="#cbd5e1" 
-            roughness={0.92} 
+          <meshStandardMaterial
+            map={moonMap}
+            color="#cbd5e1"
+            roughness={0.92}
             metalness={0.0}
           />
         </mesh>
@@ -1383,7 +1381,6 @@ function SingleEarthSatelliteMesh({
         e.stopPropagation();
         onFocus(sat);
       }}
-      className="cursor-pointer"
     >
       <sphereGeometry args={[0.07, 16, 16]} />
       <meshBasicMaterial color="#38bdf8" />
@@ -1406,8 +1403,8 @@ function SolarPlanet({
   positionsRef: React.MutableRefObject<TargetPositions>;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
-  const texture = useTexture(planet.textureUrl);
-  const ringTexture = useTexture(planet.ringTextureUrl || PLANET_TEXTURES.saturnRing);
+  const texture = useTexture(planet.textureUrl) as THREE.Texture;
+  const ringTexture = useTexture(planet.ringTextureUrl || PLANET_TEXTURES.saturnRing) as THREE.Texture;
 
   useFrame(({ clock }) => {
     const t = (clock.getElapsedTime() * timeScale) * planet.speed + planet.initialAngle;
@@ -1442,24 +1439,23 @@ function SolarPlanet({
             imageUrl: planet.previewUrl,
           });
         }}
-        className="cursor-pointer"
       >
         <sphereGeometry args={[planet.radius, 64, 64]} />
-        <meshStandardMaterial 
-          map={texture} 
-          roughness={planet.roughness ?? 0.7} 
-          metalness={0.02} 
+        <meshStandardMaterial
+          map={texture}
+          roughness={planet.roughness ?? 0.7}
+          metalness={0.02}
         />
 
         {planet.ring && (
           <mesh rotation={[Math.PI / 2.35, 0.2, 0]} raycast={() => null}>
             <ringGeometry args={[planet.radius * 1.35, planet.radius * 2.45, 64]} />
-            <meshStandardMaterial 
+            <meshStandardMaterial
               map={ringTexture}
-              side={THREE.DoubleSide} 
-              transparent 
-              opacity={0.85} 
-              roughness={0.6} 
+              side={THREE.DoubleSide}
+              transparent
+              opacity={0.85}
+              roughness={0.6}
             />
           </mesh>
         )}
@@ -1500,7 +1496,6 @@ function DeepSpaceProbes({
           e.stopPropagation();
           onFocus(voyagerData);
         }}
-        className="cursor-pointer"
       >
         <mesh rotation={[0.6, -0.4, 0]}>
           <cylinderGeometry args={[0.16, 0.01, 0.05, 16]} />
@@ -1514,16 +1509,16 @@ function DeepSpaceProbes({
 
 export default function Scene3D({
   asteroides = [],
-  camadas = { 
-    orbitas: false, 
-    miraAlvo: false, 
-    ventoSolar: true, 
-    planetas: true, 
-    satelites: true, 
-    radaresTerra: false, 
-    galaxias: true, 
-    constelacoes: false, 
-    asteroides: true 
+  camadas = {
+    orbitas: false,
+    miraAlvo: false,
+    ventoSolar: true,
+    planetas: true,
+    satelites: true,
+    radaresTerra: false,
+    galaxias: true,
+    constelacoes: false,
+    asteroides: true
   },
   timeScale = 1,
   selectedTarget = null,
@@ -1555,108 +1550,108 @@ export default function Scene3D({
   };
 
   const planetasCatalogo = useMemo(() => [
-    { 
-      name: "Mercúrio", 
-      radius: 0.45, 
-      dist: 7.0, 
-      speed: 0.04, 
-      initialAngle: 0.5, 
-      diameter: '4.879 km', 
-      distanceKm: '57,9M km', 
-      orbitalPeriod: '88 dias', 
-      gravity: '3,7 m/s²', 
+    {
+      name: "Mercúrio",
+      radius: 0.45,
+      dist: 7.0,
+      speed: 0.04,
+      initialAngle: 0.5,
+      diameter: '4.879 km',
+      distanceKm: '57,9M km',
+      orbitalPeriod: '88 dias',
+      gravity: '3,7 m/s²',
       details: 'Superfície densamente craterada fotografada pela sonda MESSENGER.',
       textureUrl: PLANET_TEXTURES.mercury,
       previewUrl: 'https://images-assets.nasa.gov/image/PIA15190/PIA15190~orig.jpg',
       roughness: 0.95
     },
-    { 
-      name: "Vénus", 
-      radius: 0.8, 
-      dist: 11.2, 
-      speed: 0.024, 
-      initialAngle: 2.1, 
-      diameter: '12.104 km', 
-      distanceKm: '108,2M km', 
-      orbitalPeriod: '225 dias', 
-      gravity: '8,87 m/s²', 
+    {
+      name: "Vénus",
+      radius: 0.8,
+      dist: 11.2,
+      speed: 0.024,
+      initialAngle: 2.1,
+      diameter: '12.104 km',
+      distanceKm: '108,2M km',
+      orbitalPeriod: '225 dias',
+      gravity: '8,87 m/s²',
       details: 'Manto perpétuo de nuvens de ácido sulfúrico em tons de ocre.',
       textureUrl: PLANET_TEXTURES.venus,
       previewUrl: 'https://images-assets.nasa.gov/image/PIA00271/PIA00271~orig.jpg',
       roughness: 0.4
     },
-    { 
-      name: "Marte", 
-      radius: 0.68, 
-      dist: 22.0, 
-      speed: 0.009, 
-      initialAngle: 4.2, 
-      diameter: '6.779 km', 
-      distanceKm: '227,9M km', 
-      orbitalPeriod: '687 dias', 
-      gravity: '3,72 m/s²', 
+    {
+      name: "Marte",
+      radius: 0.68,
+      dist: 22.0,
+      speed: 0.009,
+      initialAngle: 4.2,
+      diameter: '6.779 km',
+      distanceKm: '227,9M km',
+      orbitalPeriod: '687 dias',
+      gravity: '3,72 m/s²',
       details: 'Planeta Vermelho com calotas de gelo e desfiladeiros mapeados pela Viking.',
       textureUrl: PLANET_TEXTURES.mars,
       previewUrl: 'https://images-assets.nasa.gov/image/PIA04304/PIA04304~orig.jpg',
       roughness: 0.88
     },
-    { 
-      name: "Júpiter", 
-      radius: 2.3, 
-      dist: 36.0, 
-      speed: 0.004, 
-      initialAngle: 1.0, 
-      diameter: '139.820 km', 
-      distanceKm: '778,5M km', 
-      orbitalPeriod: '11,8 anos', 
-      gravity: '24,79 m/s²', 
+    {
+      name: "Júpiter",
+      radius: 2.3,
+      dist: 36.0,
+      speed: 0.004,
+      initialAngle: 1.0,
+      diameter: '139.820 km',
+      distanceKm: '778,5M km',
+      orbitalPeriod: '11,8 anos',
+      gravity: '24,79 m/s²',
       details: 'Gigante gasoso com faixas zonais e a Grande Mancha Vermelha.',
       textureUrl: PLANET_TEXTURES.jupiter,
       previewUrl: 'https://images-assets.nasa.gov/image/PIA02873/PIA02873~orig.jpg',
       roughness: 0.5
     },
-    { 
-      name: "Saturno", 
-      radius: 1.85, 
-      dist: 48.0, 
-      speed: 0.0028, 
-      initialAngle: 3.5, 
-      ring: true, 
-      diameter: '116.460 km', 
-      distanceKm: '1,43 Bilhão km', 
-      orbitalPeriod: '29,4 anos', 
-      gravity: '10,44 m/s²', 
+    {
+      name: "Saturno",
+      radius: 1.85,
+      dist: 48.0,
+      speed: 0.0028,
+      initialAngle: 3.5,
+      ring: true,
+      diameter: '116.460 km',
+      distanceKm: '1,43 Bilhão km',
+      orbitalPeriod: '29,4 anos',
+      gravity: '10,44 m/s²',
       details: 'Gigante gasoso dourado envolto no mais brilhante sistema de anéis.',
       textureUrl: PLANET_TEXTURES.saturn,
       ringTextureUrl: PLANET_TEXTURES.saturnRing,
       previewUrl: 'https://images-assets.nasa.gov/image/PIA01482/PIA01482~orig.jpg',
       roughness: 0.6
     },
-    { 
-      name: "Úrano", 
-      radius: 1.25, 
-      dist: 60.0, 
-      speed: 0.0018, 
-      initialAngle: 5.0, 
-      diameter: '50.724 km', 
-      distanceKm: '2,87 Bilhões km', 
-      orbitalPeriod: '84 anos', 
-      gravity: '8,69 m/s²', 
+    {
+      name: "Úrano",
+      radius: 1.25,
+      dist: 60.0,
+      speed: 0.0018,
+      initialAngle: 5.0,
+      diameter: '50.724 km',
+      distanceKm: '2,87 Bilhões km',
+      orbitalPeriod: '84 anos',
+      gravity: '8,69 m/s²',
       details: 'Gigante de gelo com atmosfera de metano gerando cor ciano pálida.',
       textureUrl: PLANET_TEXTURES.uranus,
       previewUrl: 'https://images-assets.nasa.gov/image/PIA18182/PIA18182~orig.jpg',
       roughness: 0.3
     },
-    { 
-      name: "Neptuno", 
-      radius: 1.25, 
-      dist: 72.0, 
-      speed: 0.0012, 
-      initialAngle: 0.8, 
-      diameter: '49.244 km', 
-      distanceKm: '4,5 Bilhões km', 
-      orbitalPeriod: '164,8 anos', 
-      gravity: '11,15 m/s²', 
+    {
+      name: "Neptuno",
+      radius: 1.25,
+      dist: 72.0,
+      speed: 0.0012,
+      initialAngle: 0.8,
+      diameter: '49.244 km',
+      distanceKm: '4,5 Bilhões km',
+      orbitalPeriod: '164,8 anos',
+      gravity: '11,15 m/s²',
       details: 'Mundo azul ultramarino profundo com tempestades supersónicas.',
       textureUrl: PLANET_TEXTURES.neptune,
       previewUrl: 'https://images-assets.nasa.gov/image/PIA01492/PIA01492~orig.jpg',
@@ -1666,8 +1661,8 @@ export default function Scene3D({
 
   return (
     <div className="fixed inset-0 w-full h-full z-0 bg-transparent">
-      <Canvas 
-        camera={{ position: [0, 85, 120], fov: 45, near: 0.05, far: 2000 }} 
+      <Canvas
+        camera={{ position: [0, 85, 120], fov: 45, near: 0.05, far: 2000 }}
         gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       >
         <Stars radius={300} depth={100} count={6500} factor={4} saturation={0.5} fade speed={1.0} />
@@ -1684,19 +1679,19 @@ export default function Scene3D({
         />
 
         {camadas.miraAlvo && (
-          <SelectionReticle 
-            targetKey={currentKey} 
+          <SelectionReticle
+            targetKey={currentKey}
             targetRadius={currentRadius}
-            positionsRef={positionsRef} 
+            positionsRef={positionsRef}
           />
         )}
 
         <RealisticSun onFocus={handleFocus} positionsRef={positionsRef} />
 
         {camadas.ventoSolar && (
-          <SolarElectromagneticWave 
-            kpIndex={spaceWeather?.kpIndex} 
-            windSpeed={spaceWeather?.solarWindSpeedKmS} 
+          <SolarElectromagneticWave
+            kpIndex={spaceWeather?.kpIndex}
+            windSpeed={spaceWeather?.solarWindSpeedKmS}
             timeScale={timeScale}
           />
         )}
@@ -1706,7 +1701,7 @@ export default function Scene3D({
         )}
 
         {camadas.asteroides && (
-          <AsteroidsTrackingSystem 
+          <AsteroidsTrackingSystem
             asteroides={asteroides}
             timeScale={timeScale}
             onFocus={handleFocus}
